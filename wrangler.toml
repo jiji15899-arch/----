@@ -1,0 +1,36 @@
+name = "cloudpress"
+compatibility_date = "2026-05-14"
+compatibility_flags = ["nodejs_compat"]
+pages_build_output_dir = "./dist"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "cloudpress-db"
+database_id = "e6bf3b1a-c143-4daa-8e72-557d42f1ab60"
+
+[[kv_namespaces]]
+binding = "KV"
+id = "13f767b4020e438db9a7ee5ea320801c"
+
+[[durable_objects.bindings]]
+name = "sitemanager_MyDurableObject"
+class_name = "sitemanager_MyDurableObject"
+
+[[durable_objects.bindings]]
+name = "webhook-handler_MyDurableObject"
+class_name = "webhook-handler_MyDurableObject"
+
+[[durable_objects.bindings]]
+name = "cachemanager_MyDurableObject"
+class_name = "cachemanager_MyDurableObject"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["sitemanager_MyDurableObject", "webhook-handler_MyDurableObject", "cachemanager_MyDurableObject"]
+
+[vars]
+ENVIRONMENT = "production"
+
+# Secrets (set via wrangler secret put):
+# JWT_SECRET
+# ENCRYPTION_KEY
