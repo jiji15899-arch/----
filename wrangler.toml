@@ -1,11 +1,8 @@
 name = "cloudpress"
 compatibility_date = "2026-05-16"
 
-# Cloudflare Pages 빌드 결과물 폴더 설정 (가장 중요)
+# Cloudflare Pages 빌드 결과물 폴더 설정
 pages_build_output_dir = "dist"
-
-[build]
-command = "npm run build"
 
 # 환경변수 (실제 값은 Cloudflare Dashboard에서 설정)
 [vars]
