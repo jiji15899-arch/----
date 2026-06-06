@@ -1,31 +1,22 @@
 name = "cloudpress"
 compatibility_date = "2026-05-16"
 
-# Cloudflare Pages 배포 설정
-# 빌드 결과물: dist/
-# 빌드 명령어: npm run build
+# Cloudflare Pages 빌드 결과물 폴더 설정 (가장 중요)
+pages_build_output_dir = "dist"
 
 [build]
 command = "npm run build"
-destination = "dist"
-
-[build.upload]
-format = "service-worker"
 
 # 환경변수 (실제 값은 Cloudflare Dashboard에서 설정)
 [vars]
 VITE_APP_DOMAIN = "cloud-press.co.kr"
 
-# Pages 설정
-[[pages_build_output_dir]]
-pages_build_output_dir = "dist"
-
-# KV 네임스페이스 (캐시용 - 필요시)
+# KV 네임스페이스 (캐시용 - 필요시 주석 해제)
 # [[kv_namespaces]]
 # binding = "CACHE"
 # id = "your-kv-namespace-id"
 
-# D1 데이터베이스 (필요시)
+# D1 데이터베이스 (필요시 주석 해제)
 # [[d1_databases]]
 # binding = "DB"
 # database_name = "cloudpress"
