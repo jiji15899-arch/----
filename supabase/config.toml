@@ -1,0 +1,123 @@
+# 저장 위치: /supabase/config.toml
+# Supabase 로컬 개발 환경 설정
+# 참고: https://supabase.com/docs/guides/cli/config
+
+[api]
+enabled = true
+# 로컬 개발 포트
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 15
+
+[studio]
+enabled = true
+port = 54323
+# Supabase Studio 로컬 접속 URL
+api_url = "http://127.0.0.1"
+
+[inbucket]
+enabled = true
+port = 54324
+smtp_port = 54325
+pop3_port = 54326
+
+[storage]
+enabled = true
+file_size_limit = "50MiB"
+
+[auth]
+enabled = true
+# 이메일 인증 사이트 URL
+site_url = "http://localhost:5173"
+additional_redirect_urls = [
+  "http://localhost:5173",
+  "http://localhost:5173/dashboard"
+]
+jwt_expiry = 3600
+enable_refresh_token_rotation = true
+refresh_token_reuse_interval = 10
+enable_signup = true
+enable_anonymous_sign_ins = false
+minimum_password_length = 8
+
+[auth.email]
+enable_signup = true
+double_confirm_changes = true
+enable_confirmations = true
+# 로컬 개발: 이메일 확인 없이 가입 허용하려면 false
+secure_password_change = false
+max_frequency = "1s"
+
+[auth.sms]
+enable_signup = false
+enable_confirmations = false
+
+# Google OAuth (사용하려면 아래 활성화)
+# [auth.external.google]
+# enabled = true
+# client_id = "env(GOOGLE_CLIENT_ID)"
+# secret = "env(GOOGLE_CLIENT_SECRET)"
+
+# GitHub OAuth (사용하려면 아래 활성화)
+# [auth.external.github]
+# enabled = true
+# client_id = "env(GITHUB_CLIENT_ID)"
+# secret = "env(GITHUB_CLIENT_SECRET)"
+
+[edge_runtime]
+enabled = true
+policy = "oneshot"
+inspector_port = 8083
+
+[analytics]
+enabled = false
+
+# Edge Functions 환경변수 (로컬 개발용)
+# 실제 값은 .env 파일에 설정
+[functions.validate-cloudflare]
+verify_jwt = true
+
+[functions.validate-github]
+verify_jwt = true
+
+[functions.validate-aws]
+verify_jwt = true
+
+[functions.validate-vps-provider]
+verify_jwt = true
+
+[functions.create-github-repo]
+verify_jwt = true
+
+[functions.setup-wordpress-github]
+verify_jwt = true
+
+[functions.trigger-cf-deploy]
+verify_jwt = true
+
+[functions.convert-wordpress]
+verify_jwt = true
+
+[functions.provision-vps]
+verify_jwt = true
+
+[functions.manage-vps]
+verify_jwt = true
+
+[functions.add-domain]
+verify_jwt = true
+
+[functions.check-domain-status]
+verify_jwt = true
+
+[functions.connect-domain-to-site]
+verify_jwt = true
+
+[functions.paypal-webhook]
+verify_jwt = false

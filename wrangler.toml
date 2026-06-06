@@ -1,36 +1,32 @@
 name = "cloudpress"
-compatibility_date = "2026-05-14"
-compatibility_flags = ["nodejs_compat"]
-pages_build_output_dir = "./dist"
+compatibility_date = "2026-05-16"
 
-[[d1_databases]]
-binding = "DB"
-database_name = "cloudpress-db"
-database_id = "e6bf3b1a-c143-4daa-8e72-557d42f1ab60"
+# Cloudflare Pages 배포 설정
+# 빌드 결과물: dist/
+# 빌드 명령어: npm run build
 
-[[kv_namespaces]]
-binding = "KV"
-id = "13f767b4020e438db9a7ee5ea320801c"
+[build]
+command = "npm run build"
+destination = "dist"
 
-[[durable_objects.bindings]]
-name = "sitemanager_MyDurableObject"
-class_name = "sitemanager_MyDurableObject"
+[build.upload]
+format = "service-worker"
 
-[[durable_objects.bindings]]
-name = "webhook-handler_MyDurableObject"
-class_name = "webhook-handler_MyDurableObject"
-
-[[durable_objects.bindings]]
-name = "cachemanager_MyDurableObject"
-class_name = "cachemanager_MyDurableObject"
-
-[[migrations]]
-tag = "v1"
-new_classes = ["sitemanager_MyDurableObject", "webhook-handler_MyDurableObject", "cachemanager_MyDurableObject"]
-
+# 환경변수 (실제 값은 Cloudflare Dashboard에서 설정)
 [vars]
-ENVIRONMENT = "production"
+VITE_APP_DOMAIN = "cloud-press.co.kr"
 
-# Secrets (set via wrangler secret put):
-# JWT_SECRET
-# ENCRYPTION_KEY
+# Pages 설정
+[[pages_build_output_dir]]
+path = "."
+
+# KV 네임스페이스 (캐시용 - 필요시)
+# [[kv_namespaces]]
+# binding = "CACHE"
+# id = "your-kv-namespace-id"
+
+# D1 데이터베이스 (필요시)
+# [[d1_databases]]
+# binding = "DB"
+# database_name = "cloudpress"
+# database_id = "your-d1-database-id"
