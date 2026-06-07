@@ -6,7 +6,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Globe, Check, ExternalLink, AlertCircle, CheckCircle2 } from 'lucide-react'
 import { useAuthStore } from '@/store/authStore'
 import { useToastStore } from '@/store/toastStore'
-import { createSite, createDeployment } from '@/lib/supabase'
+import { createSite, createDeployment } from '@/lib/db'
 import { generateSubdomain, isValidSubdomain } from '@/lib/utils'
 import { PRODUCT_CATALOG } from '@/types'
 import { Spinner } from '@/components/ui/Spinner'
@@ -121,7 +121,7 @@ export function GeneralWizard() {
       setCurrentStep(4)
     } catch (err) {
       const msg = err instanceof Error ? err.message : '배포 중 오류가 발생했습니다'
-      addToast({ type: 'error', message: msg })
+      addToast({ type: 'error', title: '배포 오류', message: msg })
       setDeploySteps(prev => prev.map(s => s.status === 'running' ? { ...s, status: 'error' } : s))
     } finally {
       setIsDeploying(false)
