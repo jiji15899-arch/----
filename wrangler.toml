@@ -9,6 +9,14 @@ directory = "./dist"
 # 환경변수 (실제 값은 Cloudflare Dashboard에서 설정)
 [vars]
 VITE_APP_DOMAIN = "cloud-press.co.kr"
+APP_ORIGIN = "https://sso.cloud-press.co.kr"
+
+# 민감한 OAuth 키는 반드시 Cloudflare Dashboard > Workers > Settings > Variables 에서 직접 입력
+# GOOGLE_CLIENT_ID    = ""   # → Dashboard에서 설정
+# GOOGLE_CLIENT_SECRET = ""  # → Dashboard에서 설정
+# GITHUB_CLIENT_ID    = ""   # → Dashboard에서 설정
+# GITHUB_CLIENT_SECRET = ""  # → Dashboard에서 설정
+# JWT_SECRET          = ""   # → Dashboard에서 설정
 
 # KV 네임스페이스 (캐시용 - 필요시 주석 해제)
  [[kv_namespaces]]
