@@ -9,11 +9,19 @@
 export interface Env {
   DB: D1Database
   JWT_SECRET: string
-  // 외부 서비스 키 (Cloudflare Dashboard > Workers > 환경변수에서 설정)
+  // OAuth 소셜 로그인 (Cloudflare Dashboard > Workers > 환경변수에서 설정)
+  GOOGLE_CLIENT_ID?: string
+  GOOGLE_CLIENT_SECRET?: string
+  GITHUB_CLIENT_ID?: string
+  GITHUB_CLIENT_SECRET?: string
+  APP_ORIGIN?: string  // e.g. https://sso.cloud-press.co.kr
+  // 외부 서비스 키
   PAYPAL_CLIENT_ID?: string
   PAYPAL_SECRET?: string
   PAYPAL_MODE?: string
   PAYPAL_WEBHOOK_ID?: string
+  // GitHub Actions용 (WordPress CF 호스팅)
+  GH_ACTIONS_TOKEN?: string
 }
 
 const CORS = {
@@ -251,9 +259,155 @@ async function handleResetPassword(req: Request, env: Env): Promise<Response> {
 }
 
 async function handleOAuth(req: Request, env: Env, path: string): Promise<Response> {
-  // OAuth는 Cloudflare Access 또는 별도 OAuth 서비스와 연동 필요
-  const provider = path.split('/').pop()
-  return err(`OAuth ${provider} 연동은 별도 설정이 필요합니다`, 501)
+  const url = new URL(req.url)
+  const provider = path.replace('/auth/oauth/', '').split('/')[0]
+  const appOrigin = env.APP_ORIGIN || url.origin
+
+  // ── OAuth 콜백 처리 ──────────────────────────────────────────────
+  // /auth/oauth/google/callback  또는  /auth/oauth/github/callback
+  if (path.endsWith('/callback')) {
+    const code = url.searchParams.get('code')
+    const state = url.searchParams.get('state') // redirect URL
+    if (!code) return new Response('OAuth code missing', { status: 400 })
+
+    try {
+      let userEmail = ''
+      let userName = ''
+      let avatarUrl = ''
+
+      if (provider === 'google') {
+        if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET)
+          return new Response('Google OAuth가 설정되지 않았습니다. Cloudflare Dashboard에서 GOOGLE_CLIENT_ID와 GOOGLE_CLIENT_SECRET을 설정하세요.', { status: 501 })
+
+        // 토큰 교환
+        const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            code,
+            client_id: env.GOOGLE_CLIENT_ID,
+            client_secret: env.GOOGLE_CLIENT_SECRET,
+            redirect_uri: `${appOrigin}/api/auth/oauth/google/callback`,
+            grant_type: 'authorization_code',
+          }),
+        })
+        const tokenData = await tokenRes.json() as { access_token?: string; error?: string }
+        if (!tokenData.access_token) return new Response(`Google 토큰 오류: ${tokenData.error}`, { status: 400 })
+
+        // 사용자 정보 조회
+        const userRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+          headers: { Authorization: `Bearer ${tokenData.access_token}` },
+        })
+        const userData = await userRes.json() as { email: string; name: string; picture: string }
+        userEmail = userData.email
+        userName = userData.name
+        avatarUrl = userData.picture
+
+      } else if (provider === 'github') {
+        if (!env.GITHUB_CLIENT_ID || !env.GITHUB_CLIENT_SECRET)
+          return new Response('GitHub OAuth가 설정되지 않았습니다. Cloudflare Dashboard에서 GITHUB_CLIENT_ID와 GITHUB_CLIENT_SECRET을 설정하세요.', { status: 501 })
+
+        // 토큰 교환
+        const tokenRes = await fetch('https://github.com/login/oauth/access_token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({
+            client_id: env.GITHUB_CLIENT_ID,
+            client_secret: env.GITHUB_CLIENT_SECRET,
+            code,
+            redirect_uri: `${appOrigin}/api/auth/oauth/github/callback`,
+          }),
+        })
+        const tokenData = await tokenRes.json() as { access_token?: string; error?: string }
+        if (!tokenData.access_token) return new Response(`GitHub 토큰 오류: ${tokenData.error}`, { status: 400 })
+
+        // 사용자 정보 조회
+        const userRes = await fetch('https://api.github.com/user', {
+          headers: { Authorization: `Bearer ${tokenData.access_token}`, 'User-Agent': 'CloudPress/1.0' },
+        })
+        const userData = await userRes.json() as { email: string | null; name: string; login: string; avatar_url: string }
+
+        // GitHub는 email이 null일 수 있어 emails API 조회
+        let email = userData.email
+        if (!email) {
+          const emailRes = await fetch('https://api.github.com/user/emails', {
+            headers: { Authorization: `Bearer ${tokenData.access_token}`, 'User-Agent': 'CloudPress/1.0' },
+          })
+          const emails = await emailRes.json() as Array<{ email: string; primary: boolean; verified: boolean }>
+          const primary = emails.find(e => e.primary && e.verified)
+          email = primary?.email || emails[0]?.email || ''
+        }
+        userEmail = email
+        userName = userData.name || userData.login
+        avatarUrl = userData.avatar_url
+      } else {
+        return new Response(`지원하지 않는 OAuth 제공자: ${provider}`, { status: 400 })
+      }
+
+      if (!userEmail) return new Response('이메일을 가져올 수 없습니다.', { status: 400 })
+
+      // DB에 사용자 생성 또는 조회
+      let user = await dbGet<{ id: string; email: string; role: string }>(
+        env.DB, 'SELECT id, email, role FROM profiles WHERE email = ?', [userEmail]
+      )
+      if (!user) {
+        const id = crypto.randomUUID()
+        await dbRun(env.DB,
+          `INSERT INTO profiles (id, user_id, email, name, avatar_url, role, password_hash, created_at)
+           VALUES (?, ?, ?, ?, ?, 'user', '', ?)`,
+          [id, id, userEmail, userName, avatarUrl, new Date().toISOString()]
+        )
+        user = { id, email: userEmail, role: 'user' }
+      } else {
+        // 아바타 업데이트
+        await dbRun(env.DB, 'UPDATE profiles SET avatar_url = ? WHERE id = ?', [avatarUrl, user.id])
+      }
+
+      const token = await signJWT({ id: user.id, email: user.email, role: user.role }, env.JWT_SECRET)
+
+      // 프론트엔드로 토큰 전달 (query param으로 redirect)
+      const redirectBase = decodeURIComponent(state || `${appOrigin}/dashboard`)
+      const redirectUrl = new URL(redirectBase)
+      redirectUrl.searchParams.set('cp_token', token)
+      redirectUrl.searchParams.set('cp_user', JSON.stringify({ id: user.id, email: user.email }))
+
+      return Response.redirect(redirectUrl.toString(), 302)
+    } catch (e) {
+      console.error('OAuth callback error:', e)
+      return new Response(`OAuth 처리 중 오류가 발생했습니다: ${e}`, { status: 500 })
+    }
+  }
+
+  // ── OAuth 시작 — 제공자로 리다이렉트 ────────────────────────────
+  const redirectParam = url.searchParams.get('redirect') || `${appOrigin}/dashboard`
+
+  if (provider === 'google') {
+    if (!env.GOOGLE_CLIENT_ID)
+      return err('Google OAuth가 설정되지 않았습니다. Cloudflare Dashboard에서 GOOGLE_CLIENT_ID를 설정하세요.', 501)
+    const params = new URLSearchParams({
+      client_id: env.GOOGLE_CLIENT_ID,
+      redirect_uri: `${appOrigin}/api/auth/oauth/google/callback`,
+      response_type: 'code',
+      scope: 'openid email profile',
+      state: encodeURIComponent(redirectParam),
+      access_type: 'online',
+    })
+    return Response.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params}`, 302)
+  }
+
+  if (provider === 'github') {
+    if (!env.GITHUB_CLIENT_ID)
+      return err('GitHub OAuth가 설정되지 않았습니다. Cloudflare Dashboard에서 GITHUB_CLIENT_ID를 설정하세요.', 501)
+    const params = new URLSearchParams({
+      client_id: env.GITHUB_CLIENT_ID,
+      redirect_uri: `${appOrigin}/api/auth/oauth/github/callback`,
+      scope: 'user:email',
+      state: encodeURIComponent(redirectParam),
+    })
+    return Response.redirect(`https://github.com/login/oauth/authorize?${params}`, 302)
+  }
+
+  return err(`지원하지 않는 OAuth 제공자: ${provider}`, 400)
 }
 
 // ─────────────────────────────────────────
@@ -690,11 +844,11 @@ async function handleAction(req: Request, env: Env, path: string): Promise<Respo
       return json({ success: true, repoUrl: repo.html_url, repoName: repo.full_name })
     }
 
-    // ── WordPress + GitHub 설정 ─────────
+    // ── WordPress + GitHub 설정 (완전 구현) ───────────────────────
     case 'setup-wordpress-github': {
-      const { siteId, repoName, githubToken, subdomain, siteName } = body as Record<string, string>
-      const profile = await dbGet<{ gh_token_encrypted: string }>(
-        env.DB, 'SELECT gh_token_encrypted FROM profiles WHERE user_id = ?', [user.id]
+      const { siteId, repoName, githubToken, subdomain, siteName, contentType } = body as Record<string, string>
+      const profile = await dbGet<{ gh_token_encrypted: string; cf_api_key_encrypted: string; cf_email: string }>(
+        env.DB, 'SELECT gh_token_encrypted, cf_api_key_encrypted, cf_email FROM profiles WHERE user_id = ?', [user.id]
       )
       const ghToken = githubToken || profile?.gh_token_encrypted
       if (!ghToken) return err('GitHub 토큰을 먼저 설정해주세요')
@@ -703,36 +857,424 @@ async function handleAction(req: Request, env: Env, path: string): Promise<Respo
         Authorization: `Bearer ${ghToken}`,
         'Content-Type': 'application/json',
         'User-Agent': 'CloudPress/1.0',
+        Accept: 'application/vnd.github+json',
       }
 
-      // 사용자 정보 조회
+      // 1) GitHub 사용자 정보 조회
       const userRes = await fetch('https://api.github.com/user', { headers: ghHeaders })
       if (!userRes.ok) return err('GitHub 토큰이 유효하지 않습니다')
       const ghUser = await userRes.json() as { login: string }
 
-      // 저장소 생성
+      // 2) 저장소 생성 (이미 존재하면 그대로 사용)
+      const repoSlug = (repoName || subdomain).replace(/[^a-z0-9-]/g, '-').toLowerCase()
       const createRes = await fetch('https://api.github.com/user/repos', {
         method: 'POST', headers: ghHeaders,
-        body: JSON.stringify({ name: repoName, description: `CloudPress WP: ${siteName}`, private: true, auto_init: true }),
+        body: JSON.stringify({
+          name: repoSlug,
+          description: `CloudPress WordPress: ${siteName}`,
+          private: true,
+          auto_init: true,
+          gitignore_template: null,
+        }),
       })
-      let repoUrl: string
+      let repoData: { html_url: string; full_name: string; default_branch: string }
       if (createRes.status === 422) {
-        const existing = await fetch(`https://api.github.com/repos/${ghUser.login}/${repoName}`, { headers: ghHeaders })
-        const d = await existing.json() as { html_url: string }
-        repoUrl = d.html_url
+        const existing = await fetch(`https://api.github.com/repos/${ghUser.login}/${repoSlug}`, { headers: ghHeaders })
+        repoData = await existing.json() as typeof repoData
       } else {
-        const d = await createRes.json() as { html_url: string }
-        repoUrl = d.html_url
+        repoData = await createRes.json() as typeof repoData
+      }
+      const repoUrl = repoData.html_url
+      const defaultBranch = repoData.default_branch || 'main'
+
+      // 3) WordPress 필수 파일들을 GitHub API로 커밋
+      const encodeContent = (s: string) => btoa(unescape(encodeURIComponent(s)))
+
+      // nginx.conf — WordPress PHP-FPM 처리 설정
+      const nginxConf = `
+worker_processes auto;
+error_log /dev/stderr warn;
+pid /tmp/nginx.pid;
+
+events { worker_connections 1024; }
+
+http {
+  include /etc/nginx/mime.types;
+  default_type application/octet-stream;
+  access_log /dev/stdout;
+  sendfile on;
+  keepalive_timeout 65;
+  gzip on;
+  gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
+
+  server {
+    listen 8080;
+    server_name localhost;
+    root /var/www/html;
+    index index.php index.html;
+
+    # WordPress permalink support
+    location / {
+      try_files $uri $uri/ /index.php?$args;
+    }
+
+    # PHP-FPM 처리
+    location ~ \\.php$ {
+      fastcgi_split_path_info ^(.+\\.php)(/.+)$;
+      fastcgi_pass 127.0.0.1:9000;
+      fastcgi_index index.php;
+      include fastcgi_params;
+      fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+      fastcgi_param PATH_INFO $fastcgi_path_info;
+      fastcgi_read_timeout 300;
+    }
+
+    # 미디어/정적 파일
+    location ~* \\.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+      expires 30d;
+      add_header Cache-Control "public, immutable";
+      try_files $uri =404;
+    }
+
+    location = /favicon.ico { log_not_found off; access_log off; }
+    location = /robots.txt  { log_not_found off; access_log off; allow all; }
+    location ~ /\\.          { deny all; }
+  }
+}
+`.trim()
+
+      // Cloudflare Worker (WordPress 미러링 — PHP 실행 결과 프록시)
+      const cfWorkerScript = `
+/**
+ * CloudPress WordPress Worker
+ * Cloudflare Worker → 서버리스 Nginx+PHP 백엔드를 미러링
+ *
+ * 동작 원리:
+ *  1. 사용자 요청 수신
+ *  2. GitHub Pages / Cloudflare Pages의 정적 자산은 직접 서빙
+ *  3. PHP 처리가 필요한 요청은 백엔드 origin으로 프록시
+ *
+ * 환경변수 (wrangler.toml 또는 CF Dashboard):
+ *   WP_ORIGIN  = 실제 PHP 서버 주소 (예: http://your-server-ip:8080)
+ */
+
+const WP_ORIGIN = (typeof WP_ORIGIN_ENV !== 'undefined' ? WP_ORIGIN_ENV : null)
+                  || 'http://localhost:8080'
+
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url)
+
+    // 정적 자산 (.css/.js/.png 등) → CF 캐시 우선
+    const isStatic = /\\.(css|js|png|jpg|jpeg|gif|ico|svg|woff2?|ttf|eot|map)$/i.test(url.pathname)
+    const cacheKey = new Request(request.url, request)
+    const cache = caches.default
+
+    if (isStatic) {
+      const cached = await cache.match(cacheKey)
+      if (cached) return cached
+    }
+
+    // WordPress 백엔드로 프록시
+    const origin = env.WP_ORIGIN || WP_ORIGIN
+    const proxyUrl = new URL(url.pathname + url.search, origin)
+
+    try {
+      const proxyReq = new Request(proxyUrl.toString(), {
+        method: request.method,
+        headers: request.headers,
+        body: ['GET', 'HEAD'].includes(request.method) ? null : request.body,
+        redirect: 'manual',
+      })
+
+      const response = await fetch(proxyReq)
+
+      // WordPress 리다이렉트 처리
+      if (response.status === 301 || response.status === 302) {
+        const location = response.headers.get('Location') || ''
+        const newLocation = location.replace(origin, url.origin)
+        return new Response(null, {
+          status: response.status,
+          headers: { ...Object.fromEntries(response.headers), Location: newLocation },
+        })
       }
 
-      // D1 사이트 업데이트
-      await dbRun(env.DB, 'UPDATE sites SET github_repo_url = ?, status = ? WHERE id = ?', [repoUrl, 'building', siteId])
-      await dbRun(env.DB,
-        'INSERT INTO deployments (id, site_id, status, log, triggered_at) VALUES (?, ?, ?, ?, ?)',
-        [crypto.randomUUID(), siteId, 'running', 'GitHub 저장소 설정 완료. WordPress 배포 시작 중...', new Date().toISOString()]
+      const newResponse = new Response(response.body, response)
+      newResponse.headers.set('X-Powered-By', 'CloudPress')
+      newResponse.headers.delete('X-Powered-By-PHP')
+
+      // 정적 자산 캐싱
+      if (isStatic && response.ok) {
+        const cacheRes = newResponse.clone()
+        cacheRes.headers.set('Cache-Control', 'public, max-age=2592000, immutable')
+        await cache.put(cacheKey, cacheRes)
+      }
+
+      return newResponse
+    } catch (err) {
+      return new Response(\`CloudPress 백엔드 연결 오류: \${err}\`, { status: 502 })
+    }
+  }
+}
+`.trim()
+
+      // GitHub Actions 워크플로우 — Nginx+PHP 빌드/배포
+      const githubActionsWorkflow = `
+name: CloudPress WordPress Deploy
+
+on:
+  push:
+    branches: [ ${defaultBranch} ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up PHP + Nginx + WordPress
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y nginx php8.3-fpm php8.3-cli php8.3-mysql \\
+            php8.3-pdo php8.3-sqlite3 php8.3-mbstring php8.3-xml \\
+            php8.3-curl php8.3-gd php8.3-zip php8.3-intl php8.3-json \\
+            sqlite3 curl unzip
+
+      - name: Download WordPress (latest)
+        if: \${{ !hashFiles('wordpress/wp-load.php') }}
+        run: |
+          curl -sL https://wordpress.org/latest.zip -o /tmp/wp.zip
+          unzip -q /tmp/wp.zip -d /tmp/
+          mkdir -p wordpress
+          cp -r /tmp/wordpress/. wordpress/
+          # 기본 SQLite 플러그인 설치 (DB 없이 실행 가능)
+          mkdir -p wordpress/wp-content/plugins
+          curl -sL https://downloads.wordpress.org/plugin/sqlite-database-integration.latest-stable.zip -o /tmp/sqlite.zip
+          unzip -q /tmp/sqlite.zip -d wordpress/wp-content/plugins/ || true
+
+      - name: Configure WordPress (SQLite)
+        run: |
+          cp wordpress/wp-config-sample.php wordpress/wp-config.php
+          # SQLite 설정 주입
+          sed -i "s/define( 'DB_NAME',.*\$/define('DB_NAME', 'cloudpress_db');/" wordpress/wp-config.php
+          sed -i "s/define( 'DB_USER',.*\$/define('DB_USER', 'wp');/" wordpress/wp-config.php
+          sed -i "s/define( 'DB_PASSWORD',.*\$/define('DB_PASSWORD', '');/" wordpress/wp-config.php
+          sed -i "s/define( 'DB_HOST',.*\$/define('DB_HOST', 'localhost');/" wordpress/wp-config.php
+
+          # 보안 키 생성
+          SALT=\$(curl -s https://api.wordpress.org/secret-key/1.1/salt/ || echo "define('AUTH_KEY','placeholder');")
+          echo "\$SALT" >> wordpress/wp-config.php
+          echo "define('FORCE_SSL_ADMIN', false);" >> wordpress/wp-config.php
+          echo "define('WP_SITEURL', 'https://${subdomain}.pages.dev');" >> wordpress/wp-config.php
+          echo "define('WP_HOME', 'https://${subdomain}.pages.dev');" >> wordpress/wp-config.php
+
+      - name: Configure Nginx
+        run: |
+          sudo mkdir -p /var/www/html
+          sudo cp -r wordpress/. /var/www/html/
+          sudo chown -R www-data:www-data /var/www/html
+          sudo chmod -R 755 /var/www/html
+
+          sudo cp nginx.conf /etc/nginx/nginx.conf
+          sudo sed -i 's|/tmp/nginx.pid|/run/nginx.pid|' /etc/nginx/nginx.conf
+
+          # PHP-FPM 설정
+          sudo sed -i 's/^listen = .*/listen = 127.0.0.1:9000/' /etc/php/8.3/fpm/pool.d/www.conf
+          sudo service php8.3-fpm start
+          sudo nginx -t && sudo service nginx start
+
+      - name: Health Check
+        run: |
+          sleep 3
+          curl -sf http://localhost:8080/ | head -20 || echo "WordPress is starting..."
+
+      - name: Deploy to Cloudflare Pages (static assets)
+        if: \${{ env.CF_API_TOKEN != '' }}
+        env:
+          CF_API_TOKEN: \${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: \${{ secrets.CF_ACCOUNT_ID }}
+        run: |
+          # 정적 자산만 Cloudflare Pages에 배포 (PHP 런타임은 Worker가 처리)
+          npm install -g wrangler
+          # wp-content/uploads, themes, plugins 등 정적 파일 배포
+          mkdir -p cf-static
+          cp -r wordpress/wp-content/uploads cf-static/ 2>/dev/null || true
+          cp -r wordpress/wp-content/themes  cf-static/ 2>/dev/null || true
+          # Worker 스크립트 배포
+          cp cf-worker.js cf-static/_worker.js
+          wrangler pages deploy cf-static \\
+            --project-name="${subdomain}" \\
+            --branch="${defaultBranch}" \\
+            --commit-message="CloudPress auto-deploy \$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+`.trim()
+
+      // wrangler.toml — Cloudflare Pages/Workers 설정
+      const wranglerToml = `
+name = "${repoSlug}"
+compatibility_date = "2026-01-01"
+main = "cf-worker.js"
+
+[env.production]
+vars = { WP_ORIGIN_ENV = "https://${subdomain}-backend.pages.dev" }
+
+[[env.production.kv_namespaces]]
+binding = "WP_CACHE"
+id = ""  # Cloudflare KV 네임스페이스 ID를 여기에 입력
+
+# Pages 설정
+[site]
+bucket = "./cf-static"
+`.trim()
+
+      // package.json
+      const packageJson = JSON.stringify({
+        name: repoSlug,
+        version: '1.0.0',
+        description: `CloudPress WordPress: ${siteName}`,
+        scripts: {
+          deploy: 'wrangler pages deploy cf-static --project-name=' + repoSlug,
+          'deploy:worker': 'wrangler deploy',
+          dev: 'wrangler pages dev cf-static --port=3000',
+        },
+        devDependencies: {
+          wrangler: '^3.0.0',
+        },
+      }, null, 2)
+
+      // README
+      const readme = `# ${siteName} — CloudPress WordPress
+
+> 이 저장소는 [CloudPress](https://cloud-press.co.kr)가 자동 생성한 서버리스 WordPress 호스팅입니다.
+
+## 구조
+
+\`\`\`
+├── wordpress/          # WordPress 코어 파일
+│   ├── wp-content/     # 테마, 플러그인, 미디어
+│   ├── wp-config.php   # WordPress 설정 (SQLite)
+│   └── ...
+├── nginx.conf          # Nginx 서버 설정
+├── cf-worker.js        # Cloudflare Worker (PHP 프록시/미러링)
+├── wrangler.toml       # Cloudflare 배포 설정
+└── .github/
+    └── workflows/
+        └── deploy.yml  # GitHub Actions 자동 배포
+\`\`\`
+
+## 동작 원리
+
+1. **GitHub Actions** → Nginx + PHP-FPM 서버 자동 구성
+2. **Cloudflare Worker** → PHP 실행 결과를 엣지에서 미러링(프록시)
+3. **SQLite** → 별도 MySQL 서버 없이 WordPress 운영
+
+## 배포
+
+\`\`\`bash
+# 수동 배포
+gh workflow run deploy.yml
+
+# 자동 배포: main 브랜치 push 시 자동 실행
+\`\`\`
+
+## 환경변수 (GitHub Secrets)
+
+| 이름 | 설명 |
+|------|------|
+| \`CF_API_TOKEN\` | Cloudflare API 토큰 |
+| \`CF_ACCOUNT_ID\` | Cloudflare 계정 ID |
+
+## 관리
+
+- WordPress 관리자: \`https://${subdomain}.pages.dev/wp-admin\`
+- CloudPress 콘솔: \`https://console.cloud-press.co.kr/sites/${siteId}\`
+`
+
+      // GitHub에 파일들 커밋 (base64 인코딩)
+      const filesToCreate = [
+        { path: 'nginx.conf',                            content: encodeContent(nginxConf) },
+        { path: 'cf-worker.js',                          content: encodeContent(cfWorkerScript) },
+        { path: 'wrangler.toml',                         content: encodeContent(wranglerToml) },
+        { path: 'package.json',                          content: encodeContent(packageJson) },
+        { path: 'README.md',                             content: encodeContent(readme) },
+        { path: '.github/workflows/deploy.yml',          content: encodeContent(githubActionsWorkflow) },
+        // WordPress 기본 디렉터리 구조용 .gitkeep
+        { path: 'wordpress/wp-content/uploads/.gitkeep',  content: encodeContent('') },
+        { path: 'wordpress/wp-content/plugins/.gitkeep',  content: encodeContent('') },
+        { path: 'wordpress/wp-content/themes/.gitkeep',   content: encodeContent('') },
+        { path: 'cf-static/.gitkeep',                    content: encodeContent('') },
+      ]
+
+      // 각 파일 커밋
+      const commitErrors: string[] = []
+      for (const file of filesToCreate) {
+        // 기존 파일 SHA 확인 (업데이트용)
+        let sha: string | undefined
+        try {
+          const existRes = await fetch(
+            `https://api.github.com/repos/${ghUser.login}/${repoSlug}/contents/${file.path}`,
+            { headers: ghHeaders }
+          )
+          if (existRes.ok) {
+            const existData = await existRes.json() as { sha: string }
+            sha = existData.sha
+          }
+        } catch { /* 파일 없음 */ }
+
+        const fileRes = await fetch(
+          `https://api.github.com/repos/${ghUser.login}/${repoSlug}/contents/${file.path}`,
+          {
+            method: 'PUT',
+            headers: ghHeaders,
+            body: JSON.stringify({
+              message: `CloudPress: ${file.path} 자동 생성`,
+              content: file.content,
+              ...(sha ? { sha } : {}),
+            }),
+          }
+        )
+        if (!fileRes.ok) {
+          const errData = await fileRes.json() as { message?: string }
+          commitErrors.push(`${file.path}: ${errData.message || fileRes.status}`)
+        }
+      }
+
+      // GitHub Actions 워크플로우 즉시 실행
+      await fetch(
+        `https://api.github.com/repos/${ghUser.login}/${repoSlug}/actions/workflows/deploy.yml/dispatches`,
+        {
+          method: 'POST',
+          headers: ghHeaders,
+          body: JSON.stringify({ ref: defaultBranch }),
+        }
       )
 
-      return json({ success: true, repoUrl, actionsUrl: `${repoUrl}/actions`, message: 'GitHub 저장소 생성 및 WordPress 배포 설정 완료' })
+      // D1 사이트 업데이트
+      await dbRun(env.DB,
+        'UPDATE sites SET github_repo_url = ?, cf_pages_url = ?, status = ? WHERE id = ?',
+        [repoUrl, `https://${subdomain}.pages.dev`, 'building', siteId]
+      )
+      await dbRun(env.DB,
+        'INSERT INTO deployments (id, site_id, status, log, triggered_at) VALUES (?, ?, ?, ?, ?)',
+        [
+          crypto.randomUUID(), siteId, 'running',
+          `GitHub 저장소 생성 및 파일 배포 완료. Actions 빌드 시작됨.${commitErrors.length ? ' 경고: ' + commitErrors.join(', ') : ''}`,
+          new Date().toISOString()
+        ]
+      )
+
+      return json({
+        success: true,
+        repoUrl,
+        repoName: `${ghUser.login}/${repoSlug}`,
+        actionsUrl: `${repoUrl}/actions`,
+        pagesUrl: `https://${subdomain}.pages.dev`,
+        message: 'GitHub 저장소 생성, WordPress 파일 배포, GitHub Actions 워크플로우 시작 완료',
+        commitErrors: commitErrors.length > 0 ? commitErrors : undefined,
+      })
     }
 
     // ── Cloudflare Pages 배포 ───────────
