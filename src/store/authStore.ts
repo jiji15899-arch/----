@@ -67,6 +67,23 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   initialize: async () => {
     try {
+      // OAuth 콜백 URL 파라미터 처리 (cp_token, cp_user)
+      const params = new URLSearchParams(window.location.search)
+      const oauthToken = params.get('cp_token')
+      const oauthUser = params.get('cp_user')
+      if (oauthToken && oauthUser) {
+        try {
+          const u = JSON.parse(decodeURIComponent(oauthUser)) as AuthUser
+          localStorage.setItem('cp_token', oauthToken)
+          localStorage.setItem('cp_user', JSON.stringify(u))
+          window.history.replaceState({}, '', window.location.pathname)
+          set({ user: u })
+          await get().loadProfile(u.id)
+          set({ loading: false, initialized: true })
+          return
+        } catch { /* 파싱 실패 무시 */ }
+      }
+
       // localStorage에서 저장된 세션 복원
       const stored = localStorage.getItem('cp_user')
       const token = localStorage.getItem('cp_token')
