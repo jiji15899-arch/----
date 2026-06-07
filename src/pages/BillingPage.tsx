@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react'
 import { Check, CreditCard, TrendingUp, FileText, Download } from 'lucide-react'
 import { useAuthStore } from '@/store/authStore'
-import { getInvoices } from '@/lib/supabase'
+import { getInvoices } from '@/lib/db'
 import { PLANS, Plan, Invoice } from '@/types'
 import { Spinner } from '@/components/ui/Spinner'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
