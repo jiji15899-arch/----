@@ -26,10 +26,10 @@ async function request<T>(
     },
   })
 
-  const data = await res.json()
+  const data = await res.json() as Record<string, unknown>
 
   if (!res.ok) {
-    throw new Error(data.error || `요청 실패 (${res.status})`)
+    throw new Error((data.error as string) || `요청 실패 (${res.status})`)
   }
 
   return data as T
