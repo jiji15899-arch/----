@@ -15,6 +15,11 @@ export default {
         mono: ['JetBrains Mono', 'monospace'],
       },
       colors: {
+        border: 'rgb(var(--border) / <alpha-value>)',
+        input: 'rgb(var(--input) / <alpha-value>)',
+        ring: 'rgb(var(--ring) / <alpha-value>)',
+        background: 'rgb(var(--background) / <alpha-value>)',
+        foreground: 'rgb(var(--foreground) / <alpha-value>)',
         primary: {
           DEFAULT: '#0070F3',
           50: '#EBF5FF',
