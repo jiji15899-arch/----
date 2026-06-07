@@ -1,5 +1,5 @@
 // 저장 위치: /src/pages/AuthPage.tsx
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { Cloud, Mail, Lock, User, Github, AlertCircle, Eye, EyeOff } from 'lucide-react'
 import { useAuthStore } from '@/store/authStore'
@@ -10,7 +10,7 @@ import { Spinner } from '@/components/ui/Spinner'
 type AuthMode = 'login' | 'signup' | 'forgot'
 
 export function AuthPage() {
-  const { user, signIn, signUp } = useAuthStore()
+  const { user, signIn, signUp, initialize } = useAuthStore()
   const { success, error: toastError } = useToastStore()
   const navigate = useNavigate()
 
@@ -21,6 +21,25 @@ export function AuthPage() {
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
+
+  // OAuth 콜백 처리: URL에 cp_token, cp_user가 있으면 로그인 처리
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const cpToken = params.get('cp_token')
+    const cpUser = params.get('cp_user')
+    if (cpToken && cpUser) {
+      try {
+        const u = JSON.parse(decodeURIComponent(cpUser)) as { id: string; email: string }
+        localStorage.setItem('cp_token', cpToken)
+        localStorage.setItem('cp_user', JSON.stringify(u))
+        window.history.replaceState({}, '', window.location.pathname)
+        initialize().then(() => navigate('/dashboard', { replace: true }))
+      } catch {
+        /* 무시 */
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   if (user) return <Navigate to="/dashboard" replace />
 
@@ -84,7 +103,13 @@ export function AuthPage() {
 
   const handleSocialLogin = (provider: 'google' | 'github') => {
     const API_BASE = import.meta.env.VITE_API_URL || '/api'
-    window.location.href = `${API_BASE}/auth/oauth/${provider}?redirect=${encodeURIComponent(window.location.origin + '/dashboard')}`
+    // OAuth 완료 후 토큰과 함께 돌아올 URL (SSO 존 자신)
+    const callbackReturn = window.location.origin + window.location.pathname
+    // 최종적으로 이동할 URL (콘솔 대시보드)
+    const finalRedirect = import.meta.env.VITE_CONSOLE_URL
+      ? `${import.meta.env.VITE_CONSOLE_URL}/dashboard`
+      : `${callbackReturn}?oauth=done`
+    window.location.href = `${API_BASE}/auth/oauth/${provider}?redirect=${encodeURIComponent(callbackReturn + '?final=' + encodeURIComponent(finalRedirect))}`
   }
 
   return (
