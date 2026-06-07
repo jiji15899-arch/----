@@ -6,15 +6,15 @@ import { detectZone, resolvePathZone, zoneOrigin, isProd, localPrefix } from '@/
 import type { AppZone } from '@/lib/domainRouter'
 
 import { DashboardLayout } from '@/components/dashboard/DashboardLayout'
-import { AuthPage }       from '@/pages/AuthPage'
-import { DashboardPage }  from '@/pages/DashboardPage'
-import { SitesPage }      from '@/pages/SitesPage'
-import { SiteDetailPage } from '@/pages/SiteDetailPage'
-import { CreateSitePage } from '@/pages/CreateSitePage'
-import { DomainsPage }    from '@/pages/DomainsPage'
-import { ProfilePage }    from '@/pages/ProfilePage'
-import { BillingPage }    from '@/pages/BillingPage'
-import { AdminPage }      from '@/pages/AdminPage'
+import { AuthPage }        from '@/pages/AuthPage'
+import { DashboardPage }   from '@/pages/DashboardPage'
+import { SitesPage }       from '@/pages/SitesPage'
+import { SiteDetailPage }  from '@/pages/SiteDetailPage'
+import { CreateSitePage }  from '@/pages/CreateSitePage'
+import { DomainsPage }     from '@/pages/DomainsPage'
+import { ProfilePage }     from '@/pages/ProfilePage'
+import { BillingPage }     from '@/pages/BillingPage'
+import { AdminPage }       from '@/pages/AdminPage'
 import { WordPressCFWizard }  from '@/pages/wizard/WordPressCFWizard'
 import { WordPressVPSWizard } from '@/pages/wizard/WordPressVPSWizard'
 import { GenericSiteWizard }  from '@/pages/wizard/GenericSiteWizard'
@@ -24,26 +24,15 @@ import { FeaturesPage }    from '@/pages/landing/FeaturesPage'
 import { AboutPage }       from '@/pages/landing/AboutPage'
 import { FaqPage }         from '@/pages/landing/FAQPage'
 import { ProductsPage }    from '@/pages/landing/ProductsPage'
-import { LoadingPage } from '@/components/ui/Spinner'
+import { LoadingPage }     from '@/components/ui/Spinner'
 
-// ────────────────────────────────────────
-// 존 간 URL 빌더
-// ────────────────────────────────────────
 function buildURL(zone: AppZone, path: string): string {
   return `${zoneOrigin(zone)}${isProd() ? '' : localPrefix(zone)}${path}`
 }
 function buildSSOUrl(path: string) { return buildURL('sso', path) }
+function redirectTo(url: string): null { window.location.replace(url); return null }
 
-// cross-origin redirect
-function redirectTo(url: string): null {
-  window.location.replace(url)
-  return null
-}
-
-// ────────────────────────────────────────
-// sso → console 토큰 수신 처리
-// console 도메인 진입 시 URL 파라미터에 cp_token/cp_user 있으면 localStorage에 저장
-// ────────────────────────────────────────
+// sso → console 토큰 수신: URLSearchParams가 자동 디코딩하므로 그냥 JSON.parse
 function useConsumeAuthParams() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -51,20 +40,18 @@ function useConsumeAuthParams() {
     const userStr = params.get('cp_user')
     if (token && userStr) {
       try {
-        const user = JSON.parse(decodeURIComponent(userStr))
+        // URLSearchParams.get()은 자동 decode — JSON.parse만 하면 됨
+        const user = JSON.parse(userStr)
         localStorage.setItem('cp_token', token)
         localStorage.setItem('cp_user', JSON.stringify(user))
-      } catch { /* 무시 */ }
-      // URL에서 파라미터 제거
-      const clean = window.location.pathname
-      window.history.replaceState({}, '', clean)
+      } catch (e) {
+        console.error('토큰 파싱 실패:', e, '원본값:', userStr)
+      }
+      window.history.replaceState({}, '', window.location.pathname)
     }
   }, [])
 }
 
-// ────────────────────────────────────────
-// 보호 라우트
-// ────────────────────────────────────────
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { user, loading, initialized } = useAuthStore()
   if (loading || !initialized) return <LoadingPage />
@@ -76,16 +63,10 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
   const { user, profile, loading, initialized } = useAuthStore()
   if (loading || !initialized) return <LoadingPage />
   if (!user) return redirectTo(buildSSOUrl('/login'))
-  if (profile?.role !== 'admin') {
-    window.location.replace(buildURL('console', '/dashboard'))
-    return null
-  }
+  if (profile?.role !== 'admin') { window.location.replace(buildURL('console', '/dashboard')); return null }
   return <>{children}</>
 }
 
-// ────────────────────────────────────────
-// 크로스-존 가드
-// ────────────────────────────────────────
 function CrossZoneGuard() {
   const location = useLocation()
   const currentZone = detectZone()
@@ -97,14 +78,11 @@ function CrossZoneGuard() {
   return null
 }
 
-// ────────────────────────────────────────
-// 랜딩
-// ────────────────────────────────────────
 function LandingApp() {
   return (
     <Routes>
       <Route element={<LandingLayout />}>
-        <Route index          element={<IndexPage />} />
+        <Route index           element={<IndexPage />} />
         <Route path="features" element={<FeaturesPage />} />
         <Route path="about"    element={<AboutPage />} />
         <Route path="faq"      element={<FaqPage />} />
@@ -116,9 +94,6 @@ function LandingApp() {
   )
 }
 
-// ────────────────────────────────────────
-// SSO
-// ────────────────────────────────────────
 function SSOApp() {
   return (
     <Routes>
@@ -130,51 +105,36 @@ function SSOApp() {
   )
 }
 
-// ────────────────────────────────────────
-// 콘솔
-// ────────────────────────────────────────
 function ConsoleApp() {
-  // 1) sso에서 넘어온 토큰 파라미터를 localStorage에 저장 (initialize 전에 실행)
-  useConsumeAuthParams()
-
+  useConsumeAuthParams()  // ← initialize() 전에 토큰 저장
   const { initialize, loading, initialized } = useAuthStore()
-  useEffect(() => {
-    if (!initialized) initialize()
-  }, [initialize, initialized])
-
+  useEffect(() => { if (!initialized) initialize() }, [initialize, initialized])
   if (loading || !initialized) return <LoadingPage />
 
   return (
     <Routes>
       <Route path="/" element={<Navigate to="/dashboard" replace />} />
       <Route element={<PrivateRoute><DashboardLayout /></PrivateRoute>}>
-        <Route path="/dashboard"           element={<DashboardPage />} />
-        <Route path="/sites"               element={<SitesPage />} />
-        <Route path="/sites/:siteId"       element={<SiteDetailPage />} />
-        <Route path="/create"              element={<CreateSitePage />} />
-        <Route path="/create/wordpress_cf" element={<WordPressCFWizard />} />
+        <Route path="/dashboard"            element={<DashboardPage />} />
+        <Route path="/sites"                element={<SitesPage />} />
+        <Route path="/sites/:siteId"        element={<SiteDetailPage />} />
+        <Route path="/create"               element={<CreateSitePage />} />
+        <Route path="/create/wordpress_cf"  element={<WordPressCFWizard />} />
         <Route path="/create/wordpress_vps" element={<WordPressVPSWizard />} />
-        <Route path="/create/:productId"   element={<GenericSiteWizard />} />
-        <Route path="/domains"             element={<DomainsPage />} />
-        <Route path="/profile"             element={<ProfilePage />} />
-        <Route path="/billing"             element={<BillingPage />} />
+        <Route path="/create/:productId"    element={<GenericSiteWizard />} />
+        <Route path="/domains"              element={<DomainsPage />} />
+        <Route path="/profile"              element={<ProfilePage />} />
+        <Route path="/billing"              element={<BillingPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>
   )
 }
 
-// ────────────────────────────────────────
-// 어드민
-// ────────────────────────────────────────
 function AdminApp() {
   useConsumeAuthParams()
-
   const { initialize, loading, initialized } = useAuthStore()
-  useEffect(() => {
-    if (!initialized) initialize()
-  }, [initialize, initialized])
-
+  useEffect(() => { if (!initialized) initialize() }, [initialize, initialized])
   if (loading || !initialized) return <LoadingPage />
 
   return (
@@ -186,9 +146,6 @@ function AdminApp() {
   )
 }
 
-// ────────────────────────────────────────
-// 루트
-// ────────────────────────────────────────
 export default function App() {
   const zone = detectZone()
   return (
