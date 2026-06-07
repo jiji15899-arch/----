@@ -1,6 +1,11 @@
 name = "cloudpress"
 compatibility_date = "2026-05-16"
 
+main = "src/index.ts"
+
+[assets]
+directory = "./dist"
+
 # Cloudflare Pages 빌드 결과물 폴더 설정
 pages_build_output_dir = "dist"
 
@@ -9,12 +14,12 @@ pages_build_output_dir = "dist"
 VITE_APP_DOMAIN = "cloud-press.co.kr"
 
 # KV 네임스페이스 (캐시용 - 필요시 주석 해제)
-# [[kv_namespaces]]
-# binding = "CACHE"
-# id = "your-kv-namespace-id"
+ [[kv_namespaces]]
+ binding = "CACHE"
+ id = "9b8370d20a9646b9aa73f63c9200379f"
 
 # D1 데이터베이스 (필요시 주석 해제)
-# [[d1_databases]]
-# binding = "DB"
-# database_name = "cloudpress"
-# database_id = "your-d1-database-id"
+ [[d1_databases]]
+ binding = "DB"
+ database_name = "cloudpress"
+ database_id = "784714d4-9a91-4d79-b871-523d9c24eef4"
