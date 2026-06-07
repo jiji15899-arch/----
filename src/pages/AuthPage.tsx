@@ -59,8 +59,8 @@ export function AuthPage() {
           body: JSON.stringify({ email }),
         })
         if (!res.ok) {
-          const d = await res.json()
-          throw new Error(d.error || '요청 실패')
+          const d = await res.json() as Record<string, unknown>
+          throw new Error((d.error as string) || '요청 실패')
         }
         success('이메일 발송 완료', '비밀번호 재설정 링크를 이메일로 발송했습니다.')
         setMode('login')
