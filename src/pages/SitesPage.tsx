@@ -6,7 +6,7 @@ import {
   Filter, Globe2
 } from 'lucide-react'
 import { useAuthStore } from '@/store/authStore'
-import { getMySites } from '@/lib/supabase'
+import { getMySites } from '@/lib/db'
 import { Site } from '@/types'
 import { Badge } from '@/components/ui/Badge'
 import { Spinner } from '@/components/ui/Spinner'
