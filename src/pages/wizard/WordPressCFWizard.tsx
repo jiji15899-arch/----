@@ -80,45 +80,104 @@ export function WordPressCFWizard() {
     setStep(4)
     setSetupProgress(0)
 
+    const API_BASE = import.meta.env.VITE_API_URL || '/api'
+    const token = localStorage.getItem('cp_token')
+    const headers = {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    }
+
     try {
-      // 단계별 시뮬레이션 (실제 환경에서는 Edge Function 호출)
-      for (let i = 0; i < SETUP_STEPS.length; i++) {
-        setCurrentSetupStep(i)
-        await new Promise((r) => setTimeout(r, 1800))
-        setSetupProgress(((i + 1) / SETUP_STEPS.length) * 100)
+      // 1단계: 사이트 DB 레코드 생성
+      setCurrentSetupStep(0)
+      const siteRes = await fetch(`${API_BASE}/sites`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          user_id: profile.user_id,
+          name: siteName,
+          product_type: 'wordpress_cf',
+          hosting_type: 'cloudflare',
+          subdomain,
+          status: 'building',
+          plan: profile.plan_id || 'starter',
+        }),
+      })
+      if (!siteRes.ok) {
+        const d = await siteRes.json() as { error?: string }
+        throw new Error(d.error || '사이트 생성 실패')
       }
+      const siteData = await siteRes.json() as { id: string }
+      setSetupProgress(25)
 
-      // Supabase에 사이트 생성
-      const siteData = await createSite({
-        user_id: profile.user_id,
-        name: siteName,
-        product_type: 'wordpress_cf',
-        hosting_type: 'cloudflare',
-        subdomain,
-        github_repo_url: `https://github.com/${profile.name?.toLowerCase().replace(/\s/g, '-')}/${subdomain}`,
-        cf_pages_url: `https://${subdomain}.pages.dev`,
-        status: 'active',
-        plan: profile.plan_id || 'starter',
-        last_deployed_at: new Date().toISOString(),
+      // 2단계: GitHub 저장소 생성 + WordPress 파일 커밋 + Actions 실행
+      setCurrentSetupStep(1)
+      const ghRes = await fetch(`${API_BASE}/actions/setup-wordpress-github`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          siteId: siteData.id,
+          repoName: subdomain,
+          siteName,
+          subdomain,
+          contentType: contentChoice,
+          githubToken: profile.gh_token_encrypted,
+        }),
       })
+      if (!ghRes.ok) {
+        const d = await ghRes.json() as { error?: string }
+        throw new Error(d.error || 'GitHub 설정 실패')
+      }
+      const ghData = await ghRes.json() as {
+        repoUrl: string
+        pagesUrl: string
+        actionsUrl: string
+        commitErrors?: string[]
+      }
+      setSetupProgress(60)
+      setCurrentSetupStep(2)
 
-      await createDeployment({
-        site_id: siteData.id,
-        status: 'success',
-        triggered_at: new Date().toISOString(),
-        completed_at: new Date().toISOString(),
-        log: 'WordPress 서버리스 배포 완료',
+      // 3단계: Cloudflare Pages 배포 트리거
+      await new Promise(r => setTimeout(r, 1000))
+      const cfRes = await fetch(`${API_BASE}/actions/trigger-cf-deploy`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          siteId: siteData.id,
+          repoUrl: ghData.repoUrl,
+        }),
       })
+      setSetupProgress(85)
+      setCurrentSetupStep(3)
+
+      // 4단계: 배포 기록
+      await fetch(`${API_BASE}/deployments`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          site_id: siteData.id,
+          status: 'running',
+          triggered_at: new Date().toISOString(),
+          log: 'GitHub Actions 빌드 진행 중...',
+        }),
+      })
+      setSetupProgress(100)
 
       setCompletedSite({
         id: siteData.id,
-        url: `https://${subdomain}.cloudpress.io`,
-        repoUrl: `https://github.com/${profile.name?.toLowerCase().replace(/\s/g, '-')}/${subdomain}`,
+        url: ghData.pagesUrl || `https://${subdomain}.pages.dev`,
+        repoUrl: ghData.repoUrl,
       })
       setStep(5)
-      success('🎉 배포 완료!', `${siteName} 사이트가 성공적으로 배포되었습니다.`)
-    } catch (err) {
-      error('설정 실패', '사이트 생성 중 오류가 발생했습니다. 다시 시도해주세요.')
+
+      if (ghData.commitErrors?.length) {
+        success('배포 완료 (일부 경고)', `${siteName} 사이트가 배포되었습니다. GitHub Actions 빌드가 진행 중입니다.`)
+      } else {
+        success('🎉 배포 완료!', `${siteName} 사이트가 성공적으로 배포되었습니다.`)
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : '사이트 생성 중 오류가 발생했습니다.'
+      error('설정 실패', msg)
       setStep(3)
     } finally {
       setLoading(false)
