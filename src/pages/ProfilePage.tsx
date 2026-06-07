@@ -2,12 +2,12 @@
 import { useState } from 'react'
 import { Eye, EyeOff, Check, X, AlertTriangle, Save, User, KeyRound, Github, Cloud } from 'lucide-react'
 import { useAuthStore } from '@/store/authStore'
-import { updateProfile } from '@/lib/supabase'
+import { updateProfile } from '@/lib/db'
 import { useToastStore } from '@/store/toastStore'
 import { maskApiKey } from '@/lib/utils'
 import { Spinner } from '@/components/ui/Spinner'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
-import { supabase } from '@/lib/supabase'
+
 import { cn } from '@/lib/utils'
 
 export function ProfilePage() {
@@ -105,7 +105,7 @@ export function ProfilePage() {
 
   const handleDeleteAccount = async () => {
     try {
-      await supabase.auth.signOut()
+      useAuthStore.getState().signOut()
       success('계정 삭제 완료', '계정이 삭제되었습니다.')
     } catch {
       error('삭제 실패', '계정 삭제 중 오류가 발생했습니다.')
@@ -378,4 +378,4 @@ export function ProfilePage() {
       />
     </div>
   )
-}
+          }
