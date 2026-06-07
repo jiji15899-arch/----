@@ -161,7 +161,17 @@ export default {
 
     try {
       // ── 인증 ──────────────────────────────
-      if (path === '/auth/signup'      && method === 'POST') return handleSignUp(req, env)
+      if (path === '/auth/debug-env' && method === 'GET') {
+        return json({
+          GOOGLE_CLIENT_ID: env.GOOGLE_CLIENT_ID ? env.GOOGLE_CLIENT_ID.slice(0,12)+'...' : 'NOT SET',
+          GOOGLE_CLIENT_SECRET: env.GOOGLE_CLIENT_SECRET ? env.GOOGLE_CLIENT_SECRET.slice(0,6)+'...' : 'NOT SET',
+          GITHUB_CLIENT_ID: env.GITHUB_CLIENT_ID ? env.GITHUB_CLIENT_ID.slice(0,8)+'...' : 'NOT SET',
+          GITHUB_CLIENT_SECRET: env.GITHUB_CLIENT_SECRET ? env.GITHUB_CLIENT_SECRET.slice(0,6)+'...' : 'NOT SET',
+          JWT_SECRET: env.JWT_SECRET ? 'SET (' + env.JWT_SECRET.length + 'chars)' : 'NOT SET',
+          APP_ORIGIN: env.APP_ORIGIN || 'NOT SET',
+        })
+      }
+            if (path === '/auth/signup'      && method === 'POST') return handleSignUp(req, env)
       if (path === '/auth/signin'      && method === 'POST') return handleSignIn(req, env)
       if (path === '/auth/me'          && method === 'GET')  return handleMe(req, env)
       if (path === '/auth/reset-password' && method === 'POST') return handleResetPassword(req, env)
