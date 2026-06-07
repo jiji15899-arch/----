@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { supabase } from '@/lib/supabase'
+import { getMySites, deleteSite as apiDeleteSite } from '@/lib/db'
 import { Site } from '@/types'
 import { useAuthStore } from '@/store/authStore'
 
@@ -14,15 +14,11 @@ export function useSites() {
   }, [user])
 
   const fetchSites = async () => {
+    if (!user) return
     try {
       setLoading(true)
-      const { data, error } = await supabase
-        .from('sites')
-        .select('*')
-        .order('created_at', { ascending: false })
-
-      if (error) throw error
-      setSites(data || [])
+      const data = await getMySites(user.id)
+      setSites(data)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : '사이트 목록을 불러오는 중 오류가 발생했습니다.')
     } finally {
@@ -31,8 +27,7 @@ export function useSites() {
   }
 
   const deleteSite = async (siteId: string) => {
-    const { error } = await supabase.from('sites').delete().eq('id', siteId)
-    if (error) throw error
+    await apiDeleteSite(siteId)
     setSites(prev => prev.filter(s => s.id !== siteId))
   }
 
