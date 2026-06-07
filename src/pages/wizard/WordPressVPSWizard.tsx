@@ -451,7 +451,7 @@ export function WordPressVPSWizard() {
 }
 
 function InfoRow({ label, value, isLink, onCopy }: {
-  label: string; value: string; isLink?: boolean; onCopy?: () => void
+  label: string; value: string; isLink?: boolean; onCopy?: () => Promise<boolean>
 }) {
   const { success } = useToastStore()
   return (
