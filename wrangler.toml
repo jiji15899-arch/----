@@ -6,9 +6,6 @@ main = "src/index.ts"
 [assets]
 directory = "./dist"
 
-# Cloudflare Pages 빌드 결과물 폴더 설정
-pages_build_output_dir = "dist"
-
 # 환경변수 (실제 값은 Cloudflare Dashboard에서 설정)
 [vars]
 VITE_APP_DOMAIN = "cloud-press.co.kr"
