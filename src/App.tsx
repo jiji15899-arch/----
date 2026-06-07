@@ -30,9 +30,8 @@ import { LandingLayout }   from '@/pages/landing/LandingLayout'
 import { IndexPage }       from '@/pages/landing/IndexPage'
 import { FeaturesPage }    from '@/pages/landing/FeaturesPage'
 import { AboutPage }       from '@/pages/landing/AboutPage'
-import { FaqPage }         from '@/pages/landing/FaqPage'
+import { FaqPage }         from '@/pages/landing/FAQPage'
 import { ProductsPage }    from '@/pages/landing/ProductsPage'
-import { PricingPage }     from '@/pages/landing/PricingPage'
 
 import { LoadingPage } from '@/components/ui/Spinner'
 
@@ -91,7 +90,7 @@ function LandingApp() {
         <Route path="about"    element={<AboutPage />} />
         <Route path="faq"      element={<FaqPage />} />
         <Route path="products" element={<ProductsPage />} />
-        <Route path="pricing"  element={<PricingPage />} />
+        <Route path="pricing"  element={<ProductsPage />} />
       </Route>
       {/* 잘못된 경로는 홈으로 */}
       <Route path="*" element={<Navigate to="/" replace />} />
