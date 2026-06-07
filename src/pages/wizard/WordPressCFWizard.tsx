@@ -7,7 +7,7 @@ import {
 } from 'lucide-react'
 import { useAuthStore } from '@/store/authStore'
 import { useToastStore } from '@/store/toastStore'
-import { createSite, createDeployment } from '@/lib/supabase'
+import { createSite, createDeployment } from '@/lib/db'
 import { generateSubdomain, isValidSubdomain, copyToClipboard } from '@/lib/utils'
 import { Spinner } from '@/components/ui/Spinner'
 import { cn } from '@/lib/utils'
