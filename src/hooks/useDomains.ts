@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { supabase } from '@/lib/supabase'
+import { getMyDomains, deleteDomain as apiDeleteDomain } from '@/lib/db'
 import { Domain } from '@/types'
 import { useAuthStore } from '@/store/authStore'
 
@@ -14,15 +14,11 @@ export function useDomains() {
   }, [user])
 
   const fetchDomains = async () => {
+    if (!user) return
     try {
       setLoading(true)
-      const { data, error } = await supabase
-        .from('domains')
-        .select('*')
-        .order('created_at', { ascending: false })
-
-      if (error) throw error
-      setDomains(data || [])
+      const data = await getMyDomains(user.id)
+      setDomains(data)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : '도메인 목록을 불러오는 중 오류가 발생했습니다.')
     } finally {
@@ -31,8 +27,7 @@ export function useDomains() {
   }
 
   const deleteDomain = async (domainId: string) => {
-    const { error } = await supabase.from('domains').delete().eq('id', domainId)
-    if (error) throw error
+    await apiDeleteDomain(domainId)
     setDomains(prev => prev.filter(d => d.id !== domainId))
   }
 
