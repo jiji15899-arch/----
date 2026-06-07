@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react'
 import { Globe, Plus, Copy, CheckCircle2, Clock, XCircle, X, AlertCircle, ExternalLink } from 'lucide-react'
 import { useAuthStore } from '@/store/authStore'
-import { getMyDomains, getMySites, addDomain } from '@/lib/supabase'
+import { getMyDomains, getMySites, addDomain } from '@/lib/db'
 import { Domain, Site } from '@/types'
 import { Badge } from '@/components/ui/Badge'
 import { Spinner } from '@/components/ui/Spinner'
