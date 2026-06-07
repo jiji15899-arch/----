@@ -34,9 +34,9 @@ export function VPSPanel({ site }: VPSPanelProps) {
       setLoading(action)
       await manageVPS({ siteId: site.id, action })
       const labels = { restart: '서버가 재시작되었습니다.', backup: '백업이 생성되었습니다.' }
-      addToast({ type: 'success', message: labels[action] })
+      addToast({ type: 'success', title: '완료', message: labels[action] })
     } catch {
-      addToast({ type: 'error', message: '작업 중 오류가 발생했습니다.' })
+      addToast({ type: 'error', title: '오류', message: '작업 중 오류가 발생했습니다.' })
     } finally {
       setLoading(null)
     }
