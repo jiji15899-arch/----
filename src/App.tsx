@@ -36,30 +36,53 @@ import { ProductsPage }    from '@/pages/landing/ProductsPage'
 import { LoadingPage } from '@/components/ui/Spinner'
 
 // ────────────────────────────────────────
-// 보호 라우트
-// ────────────────────────────────────────
-function PrivateRoute({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuthStore()
-  if (loading) return <LoadingPage />
-  if (!user)   return <Navigate to={buildSSOUrl('/login')} replace />
-  return <>{children}</>
-}
-
-function AdminRoute({ children }: { children: React.ReactNode }) {
-  const { profile, loading } = useAuthStore()
-  if (loading) return <LoadingPage />
-  if (profile?.role !== 'admin') return <Navigate to="/dashboard" replace />
-  return <>{children}</>
-}
-
-// ────────────────────────────────────────
 // 존 간 URL 빌더 헬퍼
 // ────────────────────────────────────────
 function buildURL(zone: AppZone, path: string): string {
   return `${zoneOrigin(zone)}${isProd() ? '' : localPrefix(zone)}${path}`
 }
 function buildSSOUrl(path: string)     { return buildURL('sso', path) }
-function buildConsoleUrl(path: string) { return buildURL('console', path) }
+
+// ────────────────────────────────────────
+// cross-origin redirect 헬퍼
+// <Navigate> 는 같은 origin 전용 — 다른 도메인은 반드시 이걸 사용
+// ────────────────────────────────────────
+function redirectTo(url: string): null {
+  window.location.replace(url)
+  return null
+}
+
+// ────────────────────────────────────────
+// 보호 라우트
+// ────────────────────────────────────────
+function PrivateRoute({ children }: { children: React.ReactNode }) {
+  const { user, loading, initialized } = useAuthStore()
+
+  // initialize() 완료 전엔 절대 렌더하지 않음
+  if (loading || !initialized) return <LoadingPage />
+
+  // 미인증 → sso 존으로 window.location.replace (cross-origin)
+  if (!user) return redirectTo(buildSSOUrl('/login'))
+
+  return <>{children}</>
+}
+
+function AdminRoute({ children }: { children: React.ReactNode }) {
+  const { user, profile, loading, initialized } = useAuthStore()
+
+  if (loading || !initialized) return <LoadingPage />
+
+  // 미인증 → sso 존으로
+  if (!user) return redirectTo(buildSSOUrl('/login'))
+
+  // 인증됐지만 admin 아님 → console /dashboard 로 (같은 origin 아닐 수 있으니 location 사용)
+  if (profile?.role !== 'admin') {
+    window.location.replace(buildURL('console', '/dashboard'))
+    return null
+  }
+
+  return <>{children}</>
+}
 
 // ────────────────────────────────────────
 // 크로스-존 리다이렉트 가드
@@ -92,7 +115,6 @@ function LandingApp() {
         <Route path="products" element={<ProductsPage />} />
         <Route path="pricing"  element={<ProductsPage />} />
       </Route>
-      {/* 잘못된 경로는 홈으로 */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )
@@ -116,9 +138,14 @@ function SSOApp() {
 // 콘솔 존 앱  (console.cloud-press.co.kr)
 // ────────────────────────────────────────
 function ConsoleApp() {
-  const { initialize, loading } = useAuthStore()
-  useEffect(() => { initialize() }, [initialize])
-  if (loading) return <LoadingPage />
+  const { initialize, loading, initialized } = useAuthStore()
+
+  useEffect(() => {
+    if (!initialized) initialize()
+  }, [initialize, initialized])
+
+  // initialize 완료 전엔 아무것도 렌더하지 않음
+  if (loading || !initialized) return <LoadingPage />
 
   return (
     <Routes>
@@ -144,9 +171,13 @@ function ConsoleApp() {
 // 어드민 존 앱  (adm-console.cloud-press.co.kr)
 // ────────────────────────────────────────
 function AdminApp() {
-  const { initialize, loading } = useAuthStore()
-  useEffect(() => { initialize() }, [initialize])
-  if (loading) return <LoadingPage />
+  const { initialize, loading, initialized } = useAuthStore()
+
+  useEffect(() => {
+    if (!initialized) initialize()
+  }, [initialize, initialized])
+
+  if (loading || !initialized) return <LoadingPage />
 
   return (
     <Routes>
@@ -154,11 +185,9 @@ function AdminApp() {
       <Route
         path="/admin"
         element={
-          <PrivateRoute>
-            <AdminRoute>
-              <AdminPage />
-            </AdminRoute>
-          </PrivateRoute>
+          <AdminRoute>
+            <AdminPage />
+          </AdminRoute>
         }
       />
       <Route path="*" element={<Navigate to="/admin" replace />} />
