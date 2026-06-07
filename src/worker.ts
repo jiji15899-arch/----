@@ -131,13 +131,30 @@ async function dbRun(db: D1Database, sql: string, args: unknown[] = []): Promise
 // ─────────────────────────────────────────
 
 export default {
-  async fetch(req: Request, env: Env): Promise<Response> {
+  async fetch(req: Request, env: Env & { ASSETS?: { fetch: (r: Request) => Promise<Response> } }): Promise<Response> {
     // CORS preflight
     if (req.method === 'OPTIONS') {
       return new Response(null, { headers: CORS })
     }
 
     const url = new URL(req.url)
+
+    // /api/* 가 아닌 모든 요청 -> 정적 에셋(SPA) 서빙
+    // Worker는 API만 처리하고, 나머지(/login /dashboard 등)는
+    // Cloudflare Assets 바인딩이 dist/index.html을 서빙한다.
+    if (!url.pathname.startsWith('/api/') && url.pathname !== '/api') {
+      if (env.ASSETS) {
+        const assetRes = await env.ASSETS.fetch(new Request(req.url, req))
+        // 정적 파일이 없으면 SPA 폴백 -> index.html
+        if (assetRes.status === 404) {
+          const indexUrl = new URL('/index.html', req.url).toString()
+          return env.ASSETS.fetch(new Request(indexUrl, req))
+        }
+        return assetRes
+      }
+      return new Response('Run vite dev server for local development', { status: 200 })
+    }
+
     // /api 접두사 제거
     const path = url.pathname.replace(/^\/api/, '')
     const method = req.method
