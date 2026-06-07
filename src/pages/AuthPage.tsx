@@ -3,23 +3,22 @@ import { useState, useEffect } from 'react'
 import { Cloud, Mail, Lock, User, Github, AlertCircle, Eye, EyeOff } from 'lucide-react'
 import { useAuthStore } from '@/store/authStore'
 import { useToastStore } from '@/store/toastStore'
-import { cn } from '@/lib/utils'
 import { Spinner } from '@/components/ui/Spinner'
 
 type AuthMode = 'login' | 'signup' | 'forgot'
 
-// sso 존에서 로그인 완료 후 console로 토큰을 URL 파라미터로 넘겨 이동
 function redirectToConsole(token: string, user: { id: string; email: string }) {
   const consoleBase = import.meta.env.VITE_CONSOLE_URL || 'https://console.cloud-press.co.kr'
+  // cp_user는 JSON 문자열 그대로 encodeURIComponent — App.tsx에서 decodeURIComponent 후 JSON.parse
   const params = new URLSearchParams({
     cp_token: token,
-    cp_user: encodeURIComponent(JSON.stringify(user)),
+    cp_user: JSON.stringify(user),  // URLSearchParams가 자동으로 인코딩함
   })
   window.location.replace(`${consoleBase}/dashboard?${params.toString()}`)
 }
 
 export function AuthPage() {
-  const { signIn, signUp } = useAuthStore()
+  const { signUp } = useAuthStore()
   const { success, error: toastError } = useToastStore()
 
   const [mode, setMode] = useState<AuthMode>('login')
@@ -30,18 +29,16 @@ export function AuthPage() {
   const [loading, setLoading] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
 
-  // OAuth 콜백 처리: URL에 cp_token, cp_user가 있으면 바로 console로 전달
+  // OAuth 콜백: URL에 cp_token/cp_user 있으면 console로 전달
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const cpToken = params.get('cp_token')
     const cpUser = params.get('cp_user')
     if (cpToken && cpUser) {
       try {
-        const u = JSON.parse(decodeURIComponent(cpUser)) as { id: string; email: string }
+        const u = JSON.parse(cpUser) as { id: string; email: string }
         redirectToConsole(cpToken, u)
-      } catch {
-        /* 파싱 실패 무시 */
-      }
+      } catch { /* 무시 */ }
     }
   }, [])
 
@@ -52,32 +49,30 @@ export function AuthPage() {
 
     try {
       if (mode === 'signup') {
-        if (!name.trim()) { setErrorMsg('이름을 입력해주세요.'); return }
-        if (password.length < 8) { setErrorMsg('비밀번호는 8자 이상이어야 합니다.'); return }
+        if (!name.trim()) { setErrorMsg('이름을 입력해주세요.'); setLoading(false); return }
+        if (password.length < 8) { setErrorMsg('비밀번호는 8자 이상이어야 합니다.'); setLoading(false); return }
         await signUp(email, password, name)
-        success('인증 메일 발송 완료', '입력하신 이메일로 인증 메일을 발송했습니다. 확인 후 로그인해주세요.')
+        success('회원가입 완료', '로그인해주세요.')
         setMode('login')
+        return
+      }
 
-      } else if (mode === 'login') {
-        // signIn은 { token, user }를 반환하지만 authStore.signIn은 void
-        // db.ts의 auth.signIn을 직접 호출해서 토큰을 받아야 함
+      if (mode === 'login') {
         const API_BASE = import.meta.env.VITE_API_URL || '/api'
         const res = await fetch(`${API_BASE}/auth/signin`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email, password }),
         })
-        const data = await res.json() as Record<string, unknown>
-        if (!res.ok) throw new Error((data.error as string) || '로그인 실패')
-
-        const token = data.token as string
-        const user = data.user as { id: string; email: string }
+        const data = await res.json() as { token?: string; user?: { id: string; email: string }; error?: string }
+        if (!res.ok) throw new Error(data.error || '로그인 실패')
 
         // console 도메인으로 토큰과 함께 이동
-        redirectToConsole(token, user)
+        redirectToConsole(data.token!, data.user!)
+        return
+      }
 
-      } else {
-        // 비밀번호 재설정
+      if (mode === 'forgot') {
         const API_BASE = import.meta.env.VITE_API_URL || '/api'
         const res = await fetch(`${API_BASE}/auth/reset-password`, {
           method: 'POST',
@@ -85,8 +80,8 @@ export function AuthPage() {
           body: JSON.stringify({ email }),
         })
         if (!res.ok) {
-          const d = await res.json() as Record<string, unknown>
-          throw new Error((d.error as string) || '요청 실패')
+          const d = await res.json() as { error?: string }
+          throw new Error(d.error || '요청 실패')
         }
         success('이메일 발송 완료', '비밀번호 재설정 링크를 이메일로 발송했습니다.')
         setMode('login')
@@ -94,10 +89,10 @@ export function AuthPage() {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : '오류가 발생했습니다.'
       const mapped =
-        msg.includes('Invalid login') || msg.includes('invalid_credentials')
+        msg.includes('Invalid login') || msg.includes('invalid_credentials') || msg.includes('올바르지 않습니다')
           ? '이메일 또는 비밀번호가 올바르지 않습니다.'
           : msg.includes('Email not confirmed') || msg.includes('not verified')
-          ? '이메일 인증을 완료해주세요. 받은 편지함을 확인해주세요.'
+          ? '이메일 인증을 완료해주세요.'
           : msg.includes('already registered') || msg.includes('already exists')
           ? '이미 사용 중인 이메일입니다.'
           : msg
@@ -110,18 +105,14 @@ export function AuthPage() {
 
   const handleSocialLogin = (provider: 'google' | 'github') => {
     const API_BASE = import.meta.env.VITE_API_URL || '/api'
-    const callbackReturn = window.location.origin + window.location.pathname
-    const consoleBase = import.meta.env.VITE_CONSOLE_URL || 'https://console.cloud-press.co.kr'
-    const finalRedirect = `${consoleBase}/dashboard`
-    window.location.href = `${API_BASE}/auth/oauth/${provider}?redirect=${encodeURIComponent(
-      callbackReturn + '?final=' + encodeURIComponent(finalRedirect)
-    )}`
+    // OAuth 콜백은 sso 도메인 자신으로 — Worker의 APP_ORIGIN과 일치
+    const callbackReturn = `${window.location.origin}/login`
+    window.location.href = `${API_BASE}/auth/oauth/${provider}?redirect=${encodeURIComponent(callbackReturn)}`
   }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-slate-100 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
-        {/* 로고 */}
         <div className="text-center mb-8">
           <div className="inline-flex items-center gap-3 mb-4">
             <div className="w-12 h-12 bg-primary rounded-2xl flex items-center justify-center shadow-lg shadow-primary/25">
@@ -145,14 +136,11 @@ export function AuthPage() {
         </div>
 
         <div className="card p-8 shadow-card">
-          {/* 소셜 로그인 */}
           {mode !== 'forgot' && (
             <>
               <div className="grid grid-cols-2 gap-3 mb-6">
-                <button
-                  onClick={() => handleSocialLogin('google')}
-                  className="flex items-center justify-center gap-2 px-4 py-2.5 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors text-sm font-medium text-slate-700 dark:text-slate-300"
-                >
+                <button onClick={() => handleSocialLogin('google')}
+                  className="flex items-center justify-center gap-2 px-4 py-2.5 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors text-sm font-medium text-slate-700 dark:text-slate-300">
                   <svg className="w-4 h-4" viewBox="0 0 24 24">
                     <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
                     <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
@@ -161,15 +149,12 @@ export function AuthPage() {
                   </svg>
                   Google로 {mode === 'login' ? '로그인' : '가입'}
                 </button>
-                <button
-                  onClick={() => handleSocialLogin('github')}
-                  className="flex items-center justify-center gap-2 px-4 py-2.5 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors text-sm font-medium text-slate-700 dark:text-slate-300"
-                >
+                <button onClick={() => handleSocialLogin('github')}
+                  className="flex items-center justify-center gap-2 px-4 py-2.5 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors text-sm font-medium text-slate-700 dark:text-slate-300">
                   <Github className="w-4 h-4" />
                   GitHub로 {mode === 'login' ? '로그인' : '가입'}
                 </button>
               </div>
-
               <div className="relative mb-6">
                 <div className="absolute inset-0 flex items-center">
                   <div className="w-full border-t border-slate-200 dark:border-slate-700" />
@@ -181,7 +166,6 @@ export function AuthPage() {
             </>
           )}
 
-          {/* 이메일 폼 */}
           <form onSubmit={handleEmailAuth} className="space-y-4">
             {mode === 'signup' && (
               <div>
@@ -193,7 +177,6 @@ export function AuthPage() {
                 </div>
               </div>
             )}
-
             <div>
               <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">이메일</label>
               <div className="relative">
@@ -202,7 +185,6 @@ export function AuthPage() {
                   placeholder="example@email.com" className="input-field pl-10" required />
               </div>
             </div>
-
             {mode !== 'forgot' && (
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">비밀번호</label>
@@ -220,23 +202,20 @@ export function AuthPage() {
                 </div>
               </div>
             )}
-
             {errorMsg && (
               <div className="flex items-start gap-2 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
                 <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
                 <p className="text-sm text-red-700 dark:text-red-400">{errorMsg}</p>
               </div>
             )}
-
             <button type="submit" disabled={loading}
               className="btn-primary w-full py-2.5 flex items-center justify-center gap-2">
-              {loading ? (
-                <><Spinner size="sm" className="border-white border-t-white/30" /> 처리 중...</>
-              ) : mode === 'login' ? '로그인' : mode === 'signup' ? '회원가입' : '재설정 링크 발송'}
+              {loading
+                ? <><Spinner size="sm" className="border-white border-t-white/30" /> 처리 중...</>
+                : mode === 'login' ? '로그인' : mode === 'signup' ? '회원가입' : '재설정 링크 발송'}
             </button>
           </form>
 
-          {/* 하단 링크 */}
           <div className="mt-6 space-y-3 text-center text-sm">
             {mode === 'login' && (
               <>
@@ -247,17 +226,13 @@ export function AuthPage() {
                 <p className="text-slate-500 dark:text-slate-400">
                   계정이 없으신가요?{' '}
                   <button onClick={() => { setMode('signup'); setErrorMsg('') }}
-                    className="text-primary font-semibold hover:underline">
-                    회원가입
-                  </button>
+                    className="text-primary font-semibold hover:underline">회원가입</button>
                 </p>
               </>
             )}
             {(mode === 'signup' || mode === 'forgot') && (
               <button onClick={() => { setMode('login'); setErrorMsg('') }}
-                className="text-primary hover:underline">
-                ← 로그인으로 돌아가기
-              </button>
+                className="text-primary hover:underline">← 로그인으로 돌아가기</button>
             )}
           </div>
         </div>
