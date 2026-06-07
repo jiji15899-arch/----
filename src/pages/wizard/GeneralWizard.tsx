@@ -83,7 +83,7 @@ export function GeneralWizard() {
         throw new Error('GitHub 저장소 생성에 실패했습니다')
       }
 
-      const ghData = await ghRes.json()
+      const ghData = await ghRes.json() as { html_url?: string; full_name?: string }
       const repoUrl = ghData.html_url || `https://github.com/${ghData.full_name}`
       setDeploySteps(prev => prev.map((s, i) => i === 0 ? { ...s, status: 'done' } : s))
 
