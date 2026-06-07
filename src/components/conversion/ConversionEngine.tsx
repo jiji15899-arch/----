@@ -3,7 +3,7 @@
 
 import { useState, useRef } from 'react'
 import { Upload, Link, FileCode, CheckCircle2, AlertTriangle, XCircle, BarChart3, ChevronDown, ChevronRight } from 'lucide-react'
-import { supabase } from '@/lib/supabase'
+import { actions } from '@/lib/db'
 import { useAuthStore } from '@/store/authStore'
 import { useToastStore } from '@/store/toastStore'
 import { Spinner } from '@/components/ui/Spinner'
@@ -48,11 +48,11 @@ export function ConversionEngine({ siteId, githubRepo, onComplete }: ConversionE
     const file = e.target.files?.[0]
     if (!file) return
     if (!file.name.endsWith('.zip')) {
-      addToast({ type: 'error', message: 'ZIP 파일만 업로드 가능합니다' })
+      addToast({ type: 'error', title: '업로드 오류', message: 'ZIP 파일만 업로드 가능합니다' })
       return
     }
     if (file.size > 50 * 1024 * 1024) {
-      addToast({ type: 'error', message: '파일 크기는 50MB 이하여야 합니다' })
+      addToast({ type: 'error', title: '업로드 오류', message: '파일 크기는 50MB 이하여야 합니다' })
       return
     }
     setSelectedFile(file)
@@ -69,11 +69,11 @@ export function ConversionEngine({ siteId, githubRepo, onComplete }: ConversionE
   const handleConvert = async () => {
     if (!profile) return
     if (inputType === 'zip' && !selectedFile) {
-      addToast({ type: 'error', message: 'ZIP 파일을 선택해주세요' })
+      addToast({ type: 'error', title: '입력 오류', message: 'ZIP 파일을 선택해주세요' })
       return
     }
     if (inputType === 'url' && !wpUrl) {
-      addToast({ type: 'error', message: 'WordPress URL을 입력해주세요' })
+      addToast({ type: 'error', title: '입력 오류', message: 'WordPress URL을 입력해주세요' })
       return
     }
 
@@ -96,30 +96,22 @@ export function ConversionEngine({ siteId, githubRepo, onComplete }: ConversionE
         zipBase64 = btoa(binary)
       }
 
-      // Supabase Edge Function 호출
-      const { data, error } = await supabase.functions.invoke('convert-wordpress', {
-        body: {
-          siteId,
-          userId: profile.user_id,
-          inputType,
-          zipBase64,
-          wpUrl: inputType === 'url' ? wpUrl : undefined,
-          githubToken: profile.gh_token_encrypted,
-          githubRepo,
-        },
-      })
-
-      if (error) throw error
+      // Workers API 호출
+      const data = await actions.convertWordPress({
+        siteId,
+        inputType,
+        data: zipBase64 ?? (inputType === 'url' ? wpUrl : ''),
+      }) as { results: ConversionResult }
 
       clearInterval(progressInterval)
       setProgress(100)
       setResult(data.results)
       onComplete?.(data.results)
-      addToast({ type: 'success', message: `변환 완료! ${data.results.converted}개 파일 변환됨` })
+      addToast({ type: 'success', title: '변환 완료', message: `${data.results.converted}개 파일 변환됨` })
     } catch (err) {
       clearInterval(progressInterval)
       const msg = err instanceof Error ? err.message : '변환 중 오류가 발생했습니다'
-      addToast({ type: 'error', message: msg })
+      addToast({ type: 'error', title: '변환 오류', message: msg })
     } finally {
       setIsConverting(false)
     }
