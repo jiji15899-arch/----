@@ -11,7 +11,7 @@ import {
   getAllUsers, getAllSites, getAllDomains, getAllProducts,
   toggleProductStatus, getAdminSettings, saveAdminSetting,
   createAuditLog, getAuditLogs
-} from '@/lib/supabase'
+} from '@/lib/db'
 import { PRODUCT_CATALOG } from '@/types'
 import { Spinner } from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/Badge'
@@ -765,4 +765,4 @@ function SecretInput({
       />
     </div>
   )
-}
+                          }
