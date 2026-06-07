@@ -3,28 +3,30 @@ compatibility_date = "2026-05-16"
 
 main = "src/worker.ts"
 
+# 정적 에셋 바인딩 — Worker에서 env.ASSETS.fetch()로 접근
 [assets]
 directory = "./dist"
+binding = "ASSETS"
 
 # 환경변수 (실제 값은 Cloudflare Dashboard에서 설정)
 [vars]
 VITE_APP_DOMAIN = "cloud-press.co.kr"
 APP_ORIGIN = "https://sso.cloud-press.co.kr"
 
-# 민감한 OAuth 키는 반드시 Cloudflare Dashboard > Workers > Settings > Variables 에서 직접 입력
-# GOOGLE_CLIENT_ID    = ""   # → Dashboard에서 설정
-# GOOGLE_CLIENT_SECRET = ""  # → Dashboard에서 설정
-# GITHUB_CLIENT_ID    = ""   # → Dashboard에서 설정
-# GITHUB_CLIENT_SECRET = ""  # → Dashboard에서 설정
-# JWT_SECRET          = ""   # → Dashboard에서 설정
+# 민감한 키는 반드시 Cloudflare Dashboard > Workers > Settings > Variables 에서 직접 입력
+# GOOGLE_CLIENT_ID     = ""
+# GOOGLE_CLIENT_SECRET = ""
+# GITHUB_CLIENT_ID     = ""
+# GITHUB_CLIENT_SECRET = ""
+# JWT_SECRET           = ""
 
-# KV 네임스페이스 (캐시용 - 필요시 주석 해제)
- [[kv_namespaces]]
- binding = "CACHE"
- id = "9b8370d20a9646b9aa73f63c9200379f"
+# KV 네임스페이스
+[[kv_namespaces]]
+binding = "CACHE"
+id = "9b8370d20a9646b9aa73f63c9200379f"
 
-# D1 데이터베이스 (필요시 주석 해제)
- [[d1_databases]]
- binding = "DB"
- database_name = "cloudpress"
- database_id = "784714d4-9a91-4d79-b871-523d9c24eef4"
+# D1 데이터베이스
+[[d1_databases]]
+binding = "DB"
+database_name = "cloudpress"
+database_id = "784714d4-9a91-4d79-b871-523d9c24eef4"
