@@ -1,6 +1,5 @@
 // 저장 위치: /src/pages/AuthPage.tsx
 import { useState, useEffect } from 'react'
-import { Navigate, useNavigate } from 'react-router-dom'
 import { Cloud, Mail, Lock, User, Github, AlertCircle, Eye, EyeOff } from 'lucide-react'
 import { useAuthStore } from '@/store/authStore'
 import { useToastStore } from '@/store/toastStore'
@@ -9,10 +8,19 @@ import { Spinner } from '@/components/ui/Spinner'
 
 type AuthMode = 'login' | 'signup' | 'forgot'
 
+// sso 존에서 로그인 완료 후 console로 토큰을 URL 파라미터로 넘겨 이동
+function redirectToConsole(token: string, user: { id: string; email: string }) {
+  const consoleBase = import.meta.env.VITE_CONSOLE_URL || 'https://console.cloud-press.co.kr'
+  const params = new URLSearchParams({
+    cp_token: token,
+    cp_user: encodeURIComponent(JSON.stringify(user)),
+  })
+  window.location.replace(`${consoleBase}/dashboard?${params.toString()}`)
+}
+
 export function AuthPage() {
-  const { user, signIn, signUp, initialize } = useAuthStore()
+  const { signIn, signUp } = useAuthStore()
   const { success, error: toastError } = useToastStore()
-  const navigate = useNavigate()
 
   const [mode, setMode] = useState<AuthMode>('login')
   const [email, setEmail] = useState('')
@@ -22,7 +30,7 @@ export function AuthPage() {
   const [loading, setLoading] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
 
-  // OAuth 콜백 처리: URL에 cp_token, cp_user가 있으면 로그인 처리
+  // OAuth 콜백 처리: URL에 cp_token, cp_user가 있으면 바로 console로 전달
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const cpToken = params.get('cp_token')
@@ -30,18 +38,12 @@ export function AuthPage() {
     if (cpToken && cpUser) {
       try {
         const u = JSON.parse(decodeURIComponent(cpUser)) as { id: string; email: string }
-        localStorage.setItem('cp_token', cpToken)
-        localStorage.setItem('cp_user', JSON.stringify(u))
-        window.history.replaceState({}, '', window.location.pathname)
-        initialize().then(() => navigate('/dashboard', { replace: true }))
+        redirectToConsole(cpToken, u)
       } catch {
-        /* 무시 */
+        /* 파싱 실패 무시 */
       }
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-
-  if (user) return <Navigate to="/dashboard" replace />
 
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -50,24 +52,29 @@ export function AuthPage() {
 
     try {
       if (mode === 'signup') {
-        if (!name.trim()) {
-          setErrorMsg('이름을 입력해주세요.')
-          return
-        }
-        if (password.length < 8) {
-          setErrorMsg('비밀번호는 8자 이상이어야 합니다.')
-          return
-        }
+        if (!name.trim()) { setErrorMsg('이름을 입력해주세요.'); return }
+        if (password.length < 8) { setErrorMsg('비밀번호는 8자 이상이어야 합니다.'); return }
         await signUp(email, password, name)
-        success(
-          '인증 메일 발송 완료',
-          '입력하신 이메일로 인증 메일을 발송했습니다. 확인 후 로그인해주세요.'
-        )
+        success('인증 메일 발송 완료', '입력하신 이메일로 인증 메일을 발송했습니다. 확인 후 로그인해주세요.')
         setMode('login')
 
       } else if (mode === 'login') {
-        await signIn(email, password)
-        navigate('/dashboard')
+        // signIn은 { token, user }를 반환하지만 authStore.signIn은 void
+        // db.ts의 auth.signIn을 직접 호출해서 토큰을 받아야 함
+        const API_BASE = import.meta.env.VITE_API_URL || '/api'
+        const res = await fetch(`${API_BASE}/auth/signin`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password }),
+        })
+        const data = await res.json() as Record<string, unknown>
+        if (!res.ok) throw new Error((data.error as string) || '로그인 실패')
+
+        const token = data.token as string
+        const user = data.user as { id: string; email: string }
+
+        // console 도메인으로 토큰과 함께 이동
+        redirectToConsole(token, user)
 
       } else {
         // 비밀번호 재설정
@@ -103,13 +110,12 @@ export function AuthPage() {
 
   const handleSocialLogin = (provider: 'google' | 'github') => {
     const API_BASE = import.meta.env.VITE_API_URL || '/api'
-    // OAuth 완료 후 토큰과 함께 돌아올 URL (SSO 존 자신)
     const callbackReturn = window.location.origin + window.location.pathname
-    // 최종적으로 이동할 URL (콘솔 대시보드)
-    const finalRedirect = import.meta.env.VITE_CONSOLE_URL
-      ? `${import.meta.env.VITE_CONSOLE_URL}/dashboard`
-      : `${callbackReturn}?oauth=done`
-    window.location.href = `${API_BASE}/auth/oauth/${provider}?redirect=${encodeURIComponent(callbackReturn + '?final=' + encodeURIComponent(finalRedirect))}`
+    const consoleBase = import.meta.env.VITE_CONSOLE_URL || 'https://console.cloud-press.co.kr'
+    const finalRedirect = `${consoleBase}/dashboard`
+    window.location.href = `${API_BASE}/auth/oauth/${provider}?redirect=${encodeURIComponent(
+      callbackReturn + '?final=' + encodeURIComponent(finalRedirect)
+    )}`
   }
 
   return (
@@ -139,7 +145,7 @@ export function AuthPage() {
         </div>
 
         <div className="card p-8 shadow-card">
-          {/* 소셜 로그인 (로그인/회원가입만) */}
+          {/* 소셜 로그인 */}
           {mode !== 'forgot' && (
             <>
               <div className="grid grid-cols-2 gap-3 mb-6">
@@ -182,14 +188,8 @@ export function AuthPage() {
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">이름</label>
                 <div className="relative">
                   <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                  <input
-                    type="text"
-                    value={name}
-                    onChange={e => setName(e.target.value)}
-                    placeholder="홍길동"
-                    className="input-field pl-10"
-                    required
-                  />
+                  <input type="text" value={name} onChange={e => setName(e.target.value)}
+                    placeholder="홍길동" className="input-field pl-10" required />
                 </div>
               </div>
             )}
@@ -198,14 +198,8 @@ export function AuthPage() {
               <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">이메일</label>
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                <input
-                  type="email"
-                  value={email}
-                  onChange={e => setEmail(e.target.value)}
-                  placeholder="example@email.com"
-                  className="input-field pl-10"
-                  required
-                />
+                <input type="email" value={email} onChange={e => setEmail(e.target.value)}
+                  placeholder="example@email.com" className="input-field pl-10" required />
               </div>
             </div>
 
@@ -214,20 +208,13 @@ export function AuthPage() {
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">비밀번호</label>
                 <div className="relative">
                   <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    value={password}
+                  <input type={showPassword ? 'text' : 'password'} value={password}
                     onChange={e => setPassword(e.target.value)}
                     placeholder={mode === 'signup' ? '8자 이상 입력' : '비밀번호 입력'}
-                    className="input-field pl-10 pr-10"
-                    required
-                    minLength={mode === 'signup' ? 8 : undefined}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(v => !v)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                  >
+                    className="input-field pl-10 pr-10" required
+                    minLength={mode === 'signup' ? 8 : undefined} />
+                  <button type="button" onClick={() => setShowPassword(v => !v)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
                     {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
                 </div>
@@ -241,20 +228,11 @@ export function AuthPage() {
               </div>
             )}
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="btn-primary w-full py-2.5 flex items-center justify-center gap-2"
-            >
+            <button type="submit" disabled={loading}
+              className="btn-primary w-full py-2.5 flex items-center justify-center gap-2">
               {loading ? (
                 <><Spinner size="sm" className="border-white border-t-white/30" /> 처리 중...</>
-              ) : mode === 'login' ? (
-                '로그인'
-              ) : mode === 'signup' ? (
-                '회원가입'
-              ) : (
-                '재설정 링크 발송'
-              )}
+              ) : mode === 'login' ? '로그인' : mode === 'signup' ? '회원가입' : '재설정 링크 발송'}
             </button>
           </form>
 
@@ -262,28 +240,22 @@ export function AuthPage() {
           <div className="mt-6 space-y-3 text-center text-sm">
             {mode === 'login' && (
               <>
-                <button
-                  onClick={() => { setMode('forgot'); setErrorMsg('') }}
-                  className="text-primary hover:underline block w-full"
-                >
+                <button onClick={() => { setMode('forgot'); setErrorMsg('') }}
+                  className="text-primary hover:underline block w-full">
                   비밀번호를 잊으셨나요?
                 </button>
                 <p className="text-slate-500 dark:text-slate-400">
                   계정이 없으신가요?{' '}
-                  <button
-                    onClick={() => { setMode('signup'); setErrorMsg('') }}
-                    className="text-primary font-semibold hover:underline"
-                  >
+                  <button onClick={() => { setMode('signup'); setErrorMsg('') }}
+                    className="text-primary font-semibold hover:underline">
                     회원가입
                   </button>
                 </p>
               </>
             )}
             {(mode === 'signup' || mode === 'forgot') && (
-              <button
-                onClick={() => { setMode('login'); setErrorMsg('') }}
-                className="text-primary hover:underline"
-              >
+              <button onClick={() => { setMode('login'); setErrorMsg('') }}
+                className="text-primary hover:underline">
                 ← 로그인으로 돌아가기
               </button>
             )}
