@@ -62,7 +62,7 @@ export function zoneOrigin(zone: AppZone): string {
 }
 
 /** 로컬 환경에서 path prefix를 앞에 붙여준다 */
-function localPrefix(zone: AppZone): string {
+export function localPrefix(zone: AppZone): string {
   const prefixMap: Record<AppZone, string> = {
     landing: '',
     console: '/console',
