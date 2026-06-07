@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Search, ChevronRight, Star, Flame } from 'lucide-react'
 import { PRODUCT_CATALOG } from '@/types'
-import { getActiveProducts } from '@/lib/supabase'
+import { getActiveProducts } from '@/lib/db'
 import { cn } from '@/lib/utils'
 import { Spinner } from '@/components/ui/Spinner'
 
